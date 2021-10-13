@@ -8,7 +8,6 @@ import cv2
 import numpy as np
 import sys
 
-
 def genGaussiankernel(width, sigma):
     x = np.arange(-int(width/2), int(width/2)+1, 1, dtype=np.float32)
     x2d, y2d = np.meshgrid(x, x)
@@ -46,22 +45,34 @@ def pyramid(im, sigma=1, prNum=6):
 
     return pyramids
 
-def foveat_img(im, fixs):
+def foveat_img(im, fixs, p, k, alpha):
     """
     im: input image
-    fixs: sequences of fixations of form [(x1, y1), (x2, y2), ...]
     
-    This function outputs the foveated image with given input image and fixations.
+    fixs: sequences of fixations of form [(x1, y1), (x2, y2), ...]
+
+    p: number of pixels a person can see in a degree of a visual angle.
+    Ultimately this appears to be used to calculate the visual angle given
+    some fixation point. A narrower visual angle corresponds to less being 
+    seen by the high-res portion of the fovea.
+
+    k: a bandwidth that is ultimately used to calculate i, the layer number.
+    This appears to influence the count of full-resolution pixels. p should 
+    be varied in such a way that it never goes too far below k, to the point 
+    where the image may be imperceptible.
+
+    alpha: the half-height angle. When this angle equals the viewing angle, 
+    the image becomes roughly half the resolution of the fixation center. 
+    This appears to be set to 2.5 by default to "approximate the actal acuity 
+    of the human retina".
+    
+    This function outputs the foveated image with given input image and fixations, 
+    as well as the number of full resolution pixels.
     """
     sigma=0.248
     prNum = 6
     As = pyramid(im, sigma, prNum)
     height, width, _ = im.shape
-    
-    # compute coef
-    p = 15
-    k = 6
-    alpha = 3
 
     x = np.arange(0, width, 1, dtype=np.float32)
     y = np.arange(0, height, 1, dtype=np.float32)
@@ -109,7 +120,8 @@ def foveat_img(im, fixs):
         if np.sum(ind) > 0:
             Ms[i][ind] = Bs[i][ind]
 
-    print('num of full-res pixel', np.sum(Ms[0] == 1))
+    num_full_res_pixels = np.sum(Ms[0] == 1)
+    print('num of full-res pixel', num_full_res_pixels)
     # generate periphery image
     im_fov = np.zeros_like(As[0], dtype=np.float32)
     for M, A in zip(Ms, As):
@@ -117,7 +129,7 @@ def foveat_img(im, fixs):
             im_fov[:, :, i] += np.multiply(M, A[:, :, i])
 
     im_fov = im_fov.astype(np.uint8)
-    return im_fov
+    return im_fov, num_full_res_pixels
 
 
 if __name__ == "__main__":
@@ -130,6 +142,11 @@ if __name__ == "__main__":
     # im = cv2.resize(im, (512, 320), cv2.INTER_CUBIC)
     xc, yc = int(im.shape[1]/2), int(im.shape[0]/2)
 
-    im = foveat_img(im, [(xc, yc)])
+    # compute coef
+    p = 15
+    k = 6
+    alpha = 3
+
+    im = foveat_img(im, [(xc, yc)], p, k, alpha)
 
     cv2.imwrite(im_path.split('.')[0]+'_RT.jpg', im)
