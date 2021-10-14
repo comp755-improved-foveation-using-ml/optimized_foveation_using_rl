@@ -20,7 +20,7 @@ if __name__ == "__main__":
     # xc, yc = int(im.shape[1]/2), int(im.shape[0]/2)
 
     # Manually find the fixation point given an object of interest
-    xc, yc = 186, 163
+    xc, yc = 350, 263
 
     # Sample compute coef
     # These are defaults that were used Zhibo Yang's original
@@ -29,6 +29,6 @@ if __name__ == "__main__":
     # k = 6
     # alpha = 3
 
-    im, num_full_res_pixels = foveat_img(im, [(xc, yc)], 15, 3, 1.5)
+    im, num_full_res_pixels = foveat_img(im, [(xc, yc)], 3, 3, 1.5)
 
     cv2.imwrite(im_path.split('.')[0]+'_RT.jpg', im)
