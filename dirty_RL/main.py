@@ -3,13 +3,14 @@ import cv2
 import numpy as np
 import random
 import matplotlib.pyplot as plt
+import lpips
 
 import torch
 import torch.nn as nn
 import torchvision
 
 from torch.distributions.normal import Normal
-
+from skimage.metrics import structural_similarity as ssim
 from model import resnet34
 from utils import foveat_img
 
@@ -92,7 +93,19 @@ def train(img_name, actor, optimizer, num_episodes=2000, eval_freq=100):
             fov_preds = resnet(state)
             log_fov_preds = nn.functional.log_softmax(fov_preds, dim=1)
 
-        reward = 1. / nn.functional.kl_div(log_fov_preds, log_orig_preds, reduction='sum', log_target=True).item()
+        kl_div = nn.functional.kl_div(log_fov_preds, log_orig_preds, reduction='sum', log_target=True).item()
+
+        ssi = ssim(np.moveaxis(fov_img.numpy(), 0, -1), np.moveaxis(img.numpy(), 0, -1), multichannel=True)
+
+        loss_fn_alex = lpips.LPIPS(net='alex')
+        loss_fn_vgg = lpips.LPIPS(net='vgg')
+        da = loss_fn_alex(state, orig_state).item()
+        dv = loss_fn_vgg(state, orig_state).item()
+
+        reward = 1. / div
+        # reward = 1. / da
+        # reward = 1. / dv
+        # reward = ssi
         reward = reward**3 + (-2.5) * actor.distribution.mean.item()
 
         # print("({}, {}) {} p: {}".format(action%447, action//447, reward, actor.distribution.mean.item()))
