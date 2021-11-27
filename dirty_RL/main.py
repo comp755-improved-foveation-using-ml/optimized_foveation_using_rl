@@ -1,11 +1,14 @@
 import os
 import cv2
 import numpy as np
+import random
 import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
 import torchvision
+
+from torch.distributions.normal import Normal
 
 from model import resnet34
 from utils import foveat_img
@@ -23,11 +26,22 @@ class Actor(nn.Module):
                                            nn.LeakyReLU(inplace=True),
                                            nn.Conv2d( 4, 1, 1, padding=0))
 
-    def forward(self, x):
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.blur_conv = nn.Sequential(nn.Linear(64, 16),
+                                       nn.LeakyReLU(inplace=True),
+                                       nn.Linear(16, 4),
+                                       nn.LeakyReLU(inplace=True),
+                                       nn.Linear( 4, 1))
+        self.distribution = Normal(torch.Tensor([0.0]), torch.Tensor([1.0]))
+
+    def forward(self, x, no_blur=False):
 
         feats, _ = self.backbone(x)
         feats = nn.functional.interpolate(feats, (335, 447))
         center = nn.functional.softmax(self.fixation_conv(feats).flatten())
+        blur_mean = self.blur_conv(self.avgpool(feats).flatten(start_dim=1)) * (no_blur == False)
+        blur_mean = nn.functional.sigmoid(blur_mean) * 3.5
+        self.distribution = Normal(blur_mean.flatten(), torch.Tensor([1.0]).cuda())
 
         return center
 
@@ -35,36 +49,24 @@ class Actor(nn.Module):
         probs_center = self.forward(s)
         return probs_center[a]
 
-    def update_weight(self, state, action, reward, optimizer):
-        loss = (-1.0) * reward * torch.log(self.pi(state, action))
+    def update_weight(self, state, action, blur_p, reward, optimizer):
+        loss = (-1.0) * reward * torch.log(self.pi(state, action)) +\
+            (-1.0) * reward * self.distribution.log_prob(blur_p)
         # update policy parameter \theta
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-def gen_gaussian():
-    x, y = np.meshgrid(np.linspace(1,447,447), np.linspace(1,335,335))
-    dst = np.sqrt((x-186)**2+(y-163)**2)
-    
-    # Intializing sigma and muu
-    sigma = 40
-    muu = 0.000
-    
-    # Calculating Gaussian array
-    return np.exp(-( (dst-muu)**2 / ( 2.0 * sigma**2 ) ) )
+def train(img_name, actor, optimizer, num_episodes=2000, eval_freq=100):
 
-def main():
-
-    actor = Actor().cuda()
     resnet = torchvision.models.resnet34(pretrained=True).cuda()
     resnet.eval()
-    optimizer = torch.optim.AdamW(actor.parameters(), lr=1e-3)
-
 
     tr = torchvision.transforms.Normalize((0.485, 0.456, 0.406),
                                           (0.229, 0.224, 0.225))
-
-    img = cv2.imread("29393.png")
+    img = cv2.imread(img_name)
+    if img.shape != (335, 447, 3):
+        img = cv2.resize(img, (447, 335))
     img = img[:, :, ::-1]
 
     orig_state = torch.Tensor(img.copy()).permute(2, 0, 1).unsqueeze(0) / 255
@@ -73,18 +75,17 @@ def main():
     with torch.no_grad():
         orig_preds = resnet(orig_state)
         log_orig_preds = nn.functional.log_softmax(orig_preds, dim=1)
-    
-    gauss = gen_gaussian().flatten()
 
-    for episode in range(10000):
+    for episode in range(num_episodes):
 
         actor.train()
 
-        probs = actor(orig_state)
-        action = probs.multinomial(1).item()
+        fixation_probs = actor(orig_state, no_blur=(episode < 0.8 * num_episodes))
+        action = fixation_probs.multinomial(1).item()
+        blur_p = actor.distribution.sample()
 
         with torch.no_grad():
-            fov_img, num_full_res_pixels = foveat_img(img, [(action%447, action//447)], 7, 3, 1.5)
+            fov_img, num_full_res_pixels = foveat_img(img, [(action%447, action//447)], blur_p.item()+7, 3, 1.5)
             state = torch.Tensor(fov_img.copy()).permute(2, 0, 1).unsqueeze(0) / 255
             state[0] = tr(state[0])
             state = state.cuda()
@@ -92,45 +93,69 @@ def main():
             log_fov_preds = nn.functional.log_softmax(fov_preds, dim=1)
 
         reward = 1. / nn.functional.kl_div(log_fov_preds, log_orig_preds, reduction='sum', log_target=True).item()
-        reward = reward**3
-        # try:
-        #     reward = -torch.log(nn.functional.kl_div(log_fov_preds, log_orig_preds, reduction='sum', log_target=True) + 1e-8).item()/10.
-        # except:
-        #     import pdb; pdb.set_trace()
-        print("({}, {}) {}".format(action%447, action//447, reward))
+        reward = reward**3 + (-2.5) * actor.distribution.mean.item()
 
-        # reward = gauss[action]
+        # print("({}, {}) {} p: {}".format(action%447, action//447, reward, actor.distribution.mean.item()))
 
-        actor.update_weight(orig_state, action, reward, optimizer)
-
-        # if episode%10 == 0:
-        #     probs = probs.reshape(335, 447).detach().cpu().numpy()
-        #     heatmap = cv2.applyColorMap((probs * 255).astype(np.uint8), cv2.COLORMAP_JET)
-        #     cv2.imshow("123", heatmap)
-        #     key = cv2.waitKey(500)
-
-        # rewards.append(reward)
-
-        # if done:
-        #     print("Episode {} finished after {} timesteps".format(i_episode, timesteps+1))
-        #     break
-
-        # actor.update_weight(states, actions, rewards, optimizer)
+        actor.update_weight(orig_state, action, blur_p, reward, optimizer)
 
         # evaluation
-        with torch.no_grad():
+        if eval_freq > 0 and episode%eval_freq == 0:
+            with torch.no_grad():
 
-            actor.eval()
+                actor.eval()
 
-            probs = actor(orig_state)
-            action = torch.argmax(probs).item()
-            if episode%10 == 0:
-                fov_img, num_full_res_pixels = foveat_img(img, [(action%447, action//447)], 7, 3, 1.5)
-                cv2.imshow("frame", fov_img[:, :, ::-1])
-                key = cv2.waitKey(100)
-                print("({}, {})".format(action%447, action//447))
-                cv2.imwrite(os.path.join("kl_outputs", "{}.png".format(episode//10)), fov_img[:, :, ::-1])
+                fixation_probs = actor(orig_state)
+                action = torch.argmax(fixation_probs).item()
+                blur_p = actor.distribution.mean
+                if episode%25 == 0:
+                    fov_img, num_full_res_pixels = foveat_img(img, [(action%447, action//447)], blur_p.item()+7, 3, 1.5)
+                    cv2.imshow("frame", fov_img[:, :, ::-1])
+                    key = cv2.waitKey(100)
+                    print("({}, {})".format(action%447, action//447))
+                    cv2.imwrite(os.path.join("kl_outputs", "{}.png".format(episode//10)), fov_img[:, :, ::-1])
 
+def eval(img_name, actor, epoch):
+
+    with torch.no_grad():
+
+        img = cv2.imread(img_name)
+        if img.shape != (335, 447, 3):
+            img = cv2.resize(img, (447, 335))
+        img = img[:, :, ::-1]
+
+        orig_state = torch.Tensor(img.copy()).permute(2, 0, 1).unsqueeze(0) / 255
+        tr = torchvision.transforms.Normalize((0.485, 0.456, 0.406),
+                                              (0.229, 0.224, 0.225))
+        orig_state[0] = tr(orig_state[0])
+        orig_state = orig_state.cuda()
+
+        actor.eval()
+
+        fixation_probs = actor(orig_state)
+        action = torch.argmax(fixation_probs).item()
+        blur_p = actor.distribution.mean
+        fov_img, num_full_res_pixels = foveat_img(img, [(action%447, action//447)], blur_p.item()+7, 3, 1.5)
+        # cv2.imshow("frame", fov_img[:, :, ::-1])
+        # key = cv2.waitKey(100)
+        if not os.path.exists(os.path.join("outputs", str(epoch))):
+            os.makedirs(os.path.join("outputs", str(epoch)))
+        
+        img_name = os.path.basename(img_name).split(".")[0]
+        cv2.imwrite(os.path.join("outputs", str(epoch), "{}_{}_{}_{}.jpg".format(img_name, action%447, action//447, blur_p.item()+7)),
+            fov_img[:, :, ::-1])
+
+        
 
 if __name__ == '__main__':
-    main()
+    actor = Actor().cuda()
+    optimizer = torch.optim.AdamW(actor.parameters(), lr=1e-3)
+    img_names = os.listdir("data")
+    img_names = [name for name in img_names if name.endswith(".jpg") ]
+    for epoch in range(100):
+        random.shuffle(img_names)
+        for img_name in img_names:
+            img_path = os.path.join("data", img_name)
+            train(img_path, actor, optimizer, num_episodes=200, eval_freq=-1)
+            eval(img_path, actor, epoch)
+        torch.save(actor.state_dict(), os.path.join("ckpt", "{}.pth".format(epoch)))
