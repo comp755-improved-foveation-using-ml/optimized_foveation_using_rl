@@ -194,5 +194,8 @@ if __name__ == '__main__':
         for img_name in img_names:
             img_path = os.path.join("data", img_name)
             train(img_path, actor, optimizer, num_episodes=200, eval_freq=-1)
-            metrics.append(eval(img_path, actor, epoch))
+            result = eval(img_path, actor, epoch)
+            if epoch is 99:
+                metrics.append(result)
         torch.save(actor.state_dict(), os.path.join("ckpt", "{}.pth".format(epoch)))
+    print(np.mean(metrics, axis=0))
