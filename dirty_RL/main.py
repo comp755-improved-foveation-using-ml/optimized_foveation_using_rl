@@ -95,20 +95,20 @@ def train(img_name, actor, optimizer, num_episodes=2000, eval_freq=100):
 
         kl_div = nn.functional.kl_div(log_fov_preds, log_orig_preds, reduction='sum', log_target=True).item()
 
-        ssi = ssim(np.moveaxis(fov_img.numpy(), 0, -1), np.moveaxis(img.numpy(), 0, -1), multichannel=True)
+        ssi = ssim(fov_img, img, multichannel=True)
 
-        loss_fn_alex = lpips.LPIPS(net='alex')
-        loss_fn_vgg = lpips.LPIPS(net='vgg')
-        da = loss_fn_alex(state, orig_state).item()
-        dv = loss_fn_vgg(state, orig_state).item()
+        # loss_fn_alex = lpips.LPIPS(net='alex')
+        # loss_fn_vgg = lpips.LPIPS(net='vgg')
+        # da = loss_fn_alex(state, orig_state).item()
+        # dv = loss_fn_vgg(state, orig_state).item()
 
-        reward = 1. / div
+        reward = 1. / kl_div
         # reward = 1. / da
         # reward = 1. / dv
         # reward = ssi
         reward = reward**3 + (-2.5) * actor.distribution.mean.item()
 
-        # print("({}, {}) {} p: {}".format(action%447, action//447, reward, actor.distribution.mean.item()))
+        print("({}, {}) {} p: {}".format(action%447, action//447, reward, actor.distribution.mean.item()))
 
         actor.update_weight(orig_state, action, blur_p, reward, optimizer)
 
@@ -130,6 +130,9 @@ def train(img_name, actor, optimizer, num_episodes=2000, eval_freq=100):
 
 def eval(img_name, actor, epoch):
 
+    resnet = torchvision.models.resnet34(pretrained=True).cuda()
+    resnet.eval()
+
     with torch.no_grad():
 
         img = cv2.imread(img_name)
@@ -142,13 +145,31 @@ def eval(img_name, actor, epoch):
                                               (0.229, 0.224, 0.225))
         orig_state[0] = tr(orig_state[0])
         orig_state = orig_state.cuda()
+        orig_preds = resnet(orig_state)
+        log_orig_preds = nn.functional.log_softmax(orig_preds, dim=1)
 
         actor.eval()
 
         fixation_probs = actor(orig_state)
         action = torch.argmax(fixation_probs).item()
         blur_p = actor.distribution.mean
+
         fov_img, num_full_res_pixels = foveat_img(img, [(action%447, action//447)], blur_p.item()+7, 3, 1.5)
+        state = torch.Tensor(fov_img.copy()).permute(2, 0, 1).unsqueeze(0) / 255
+        state[0] = tr(state[0])
+        state = state.cuda()
+        fov_preds = resnet(state)
+        log_fov_preds = nn.functional.log_softmax(fov_preds, dim=1)
+
+        kl_div = nn.functional.kl_div(log_fov_preds, log_orig_preds, reduction='sum', log_target=True).item()
+
+        ssi = ssim(fov_img, img, multichannel=True)
+
+        # loss_fn_alex = lpips.LPIPS(net='alex')
+        # loss_fn_vgg = lpips.LPIPS(net='vgg')
+        # da = loss_fn_alex(state, orig_state).item()
+        # dv = loss_fn_vgg(state, orig_state).item()
+
         # cv2.imshow("frame", fov_img[:, :, ::-1])
         # key = cv2.waitKey(100)
         if not os.path.exists(os.path.join("outputs", str(epoch))):
@@ -158,17 +179,20 @@ def eval(img_name, actor, epoch):
         cv2.imwrite(os.path.join("outputs", str(epoch), "{}_{}_{}_{}.jpg".format(img_name, action%447, action//447, blur_p.item()+7)),
             fov_img[:, :, ::-1])
 
+        return kl_div, num_full_res_pixels
+
         
 
 if __name__ == '__main__':
     actor = Actor().cuda()
     optimizer = torch.optim.AdamW(actor.parameters(), lr=1e-3)
     img_names = os.listdir("data")
-    img_names = [name for name in img_names if name.endswith(".jpg") ]
+    img_names = [name for name in img_names if name.endswith(".jpg") or name.endswith(".png")]
+    metrics = []
     for epoch in range(100):
         random.shuffle(img_names)
         for img_name in img_names:
             img_path = os.path.join("data", img_name)
             train(img_path, actor, optimizer, num_episodes=200, eval_freq=-1)
-            eval(img_path, actor, epoch)
+            metrics.append(eval(img_path, actor, epoch))
         torch.save(actor.state_dict(), os.path.join("ckpt", "{}.pth".format(epoch)))
