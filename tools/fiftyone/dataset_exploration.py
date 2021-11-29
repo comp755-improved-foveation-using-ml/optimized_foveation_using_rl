@@ -4,8 +4,7 @@ import fiftyone.zoo as foz
 # Download and load the validation split of COCO-2017
 dataset = foz.load_zoo_dataset(
     "coco-2017",
-    split="train",
-    classes=["dog"],
+    split="test",
     only_matching=True,
     max_samples=500,
 )
@@ -13,6 +12,7 @@ dataset = foz.load_zoo_dataset(
 session = fo.launch_app(dataset)
 
 # The directory to which to write the exported dataset
+# Modify this line as needed prior to running this script
 export_dir = "/Users/akshayparuchuri/machine_learning/optimized_foveation_using_rl/dataset"
 
 # The name of the sample field containing the label that you wish to export
