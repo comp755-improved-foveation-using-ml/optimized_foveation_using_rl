@@ -4,7 +4,7 @@ import fiftyone.zoo as foz
 # Download and load the validation split of COCO-2017
 dataset = foz.load_zoo_dataset(
     "coco-2017",
-    split="test",
+    split="train",
     only_matching=True,
     max_samples=500,
 )
