@@ -62,6 +62,8 @@ def train(img_name, actor, optimizer, num_episodes=2000, eval_freq=100):
 
     resnet = torchvision.models.resnet34(pretrained=True).cuda()
     resnet.eval()
+    loss_fn_alex = lpips.LPIPS(net='alex')
+    loss_fn_vgg = lpips.LPIPS(net='vgg')
 
     tr = torchvision.transforms.Normalize((0.485, 0.456, 0.406),
                                           (0.229, 0.224, 0.225))
@@ -97,10 +99,8 @@ def train(img_name, actor, optimizer, num_episodes=2000, eval_freq=100):
 
         ssi = ssim(fov_img, img, multichannel=True)
 
-        # loss_fn_alex = lpips.LPIPS(net='alex')
-        # loss_fn_vgg = lpips.LPIPS(net='vgg')
-        # da = loss_fn_alex(state, orig_state).item()
-        # dv = loss_fn_vgg(state, orig_state).item()
+        da = loss_fn_alex(state.cpu(), orig_state.cpu()).item()
+        dv = loss_fn_vgg(state.cpu(), orig_state.cpu()).item()
 
         reward = 1. / kl_div
         # reward = 1. / da
@@ -132,6 +132,8 @@ def eval(img_name, actor, epoch):
 
     resnet = torchvision.models.resnet34(pretrained=True).cuda()
     resnet.eval()
+    loss_fn_alex = lpips.LPIPS(net='alex')
+    loss_fn_vgg = lpips.LPIPS(net='vgg')
 
     with torch.no_grad():
 
@@ -165,10 +167,8 @@ def eval(img_name, actor, epoch):
 
         ssi = ssim(fov_img, img, multichannel=True)
 
-        # loss_fn_alex = lpips.LPIPS(net='alex')
-        # loss_fn_vgg = lpips.LPIPS(net='vgg')
-        # da = loss_fn_alex(state, orig_state).item()
-        # dv = loss_fn_vgg(state, orig_state).item()
+        da = loss_fn_alex(state.cpu(), orig_state.cpu()).item()
+        dv = loss_fn_vgg(state.cpu(), orig_state.cpu()).item()
 
         # cv2.imshow("frame", fov_img[:, :, ::-1])
         # key = cv2.waitKey(100)
