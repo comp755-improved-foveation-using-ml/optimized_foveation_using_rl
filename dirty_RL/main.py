@@ -62,8 +62,6 @@ def train(img_name, actor, optimizer, num_episodes=2000, eval_freq=100):
 
     resnet = torchvision.models.resnet34(pretrained=True).cuda()
     resnet.eval()
-    loss_fn_alex = lpips.LPIPS(net='alex')
-    loss_fn_vgg = lpips.LPIPS(net='vgg')
 
     tr = torchvision.transforms.Normalize((0.485, 0.456, 0.406),
                                           (0.229, 0.224, 0.225))
@@ -96,16 +94,7 @@ def train(img_name, actor, optimizer, num_episodes=2000, eval_freq=100):
             log_fov_preds = nn.functional.log_softmax(fov_preds, dim=1)
 
         kl_div = nn.functional.kl_div(log_fov_preds, log_orig_preds, reduction='sum', log_target=True).item()
-
-        ssi = ssim(fov_img, img, multichannel=True)
-
-        da = loss_fn_alex(state.cpu(), orig_state.cpu()).item()
-        dv = loss_fn_vgg(state.cpu(), orig_state.cpu()).item()
-
         reward = 1. / kl_div
-        # reward = 1. / da
-        # reward = 1. / dv
-        # reward = ssi
         reward = reward**3 + (-2.5) * actor.distribution.mean.item()
 
         print("({}, {}) {} p: {}".format(action%447, action//447, reward, actor.distribution.mean.item()))
@@ -188,14 +177,10 @@ if __name__ == '__main__':
     optimizer = torch.optim.AdamW(actor.parameters(), lr=1e-3)
     img_names = os.listdir("data")
     img_names = [name for name in img_names if name.endswith(".jpg") or name.endswith(".png")]
-    metrics = []
     for epoch in range(100):
         random.shuffle(img_names)
         for img_name in img_names:
             img_path = os.path.join("data", img_name)
             train(img_path, actor, optimizer, num_episodes=200, eval_freq=-1)
-            result = eval(img_path, actor, epoch)
-            if epoch == 99:
-                metrics.append(result)
+            # result = eval(img_path, actor, epoch)
         torch.save(actor.state_dict(), os.path.join("ckpt", "{}.pth".format(epoch)))
-    print(np.mean(metrics, axis=0))
