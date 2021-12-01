@@ -56,12 +56,7 @@ class Actor(nn.Module):
         loss.backward()
         optimizer.step()
 
-def eval(img_name, actor, epoch):
-
-    resnet = torchvision.models.resnet34(pretrained=True).cuda()
-    resnet.eval()
-    loss_fn_alex = lpips.LPIPS(net='alex')
-    loss_fn_vgg = lpips.LPIPS(net='vgg')
+def eval(img_name, actor, epoch, resnet, loss_fn_vgg):
 
     with torch.no_grad():
 
@@ -95,8 +90,7 @@ def eval(img_name, actor, epoch):
 
         ssi = ssim(fov_img, img, multichannel=True)
 
-        da = loss_fn_alex(state.cpu(), orig_state.cpu()).item()
-        dv = loss_fn_vgg(state.cpu(), orig_state.cpu()).item()
+        perceptual_loss = loss_fn_vgg(state.cpu(), orig_state.cpu()).item()
 
         # cv2.imshow("frame", fov_img[:, :, ::-1])
         # key = cv2.waitKey(100)
@@ -107,9 +101,14 @@ def eval(img_name, actor, epoch):
         cv2.imwrite(os.path.join("outputs", str(epoch), "{}_{}_{}_{}.jpg".format(img_name, action%447, action//447, blur_p.item()+7)),
             fov_img[:, :, ::-1])
 
-        return kl_div, ssi, da, dv, num_full_res_pixels
+        return kl_div, ssi, perceptual_loss, num_full_res_pixels
 
 if __name__ == '__main__':
+
+    resnet = torchvision.models.resnet34(pretrained=True).cuda()
+    resnet.eval()
+    loss_fn_vgg = lpips.LPIPS(net='vgg')
+
     actor = Actor().cuda()
     actor.load_state_dict(torch.load("ckpt/999.pth"))
     img_names = os.listdir("data")
@@ -117,7 +116,8 @@ if __name__ == '__main__':
     metrics = []
     random.shuffle(img_names)
     for img_name in img_names:
+        print(img_name)
         img_path = os.path.join("data", img_name)
-        result = eval(img_path, actor, 0)
+        result = eval(img_path, actor, 0, resnet, loss_fn_vgg)
         metrics.append(result)
     print(np.mean(metrics, axis=0))
