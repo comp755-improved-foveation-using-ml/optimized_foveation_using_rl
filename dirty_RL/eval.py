@@ -110,14 +110,27 @@ if __name__ == '__main__':
     loss_fn_vgg = lpips.LPIPS(net='vgg')
 
     actor = Actor().cuda()
-    actor.load_state_dict(torch.load("ckpt/999.pth"))
-    img_names = os.listdir("data")
+    actor.load_state_dict(torch.load("ckpt/25.pth"))
+    img_names = os.listdir(os.path.abspath(os.path.join(__file__ ,"../../dataset/COCO-2017-test-500/data")))
     img_names = [name for name in img_names if name.endswith(".jpg") or name.endswith(".png")]
     metrics = []
     random.shuffle(img_names)
     for img_name in img_names:
         print(img_name)
-        img_path = os.path.join("data", img_name)
+        img_path = os.path.join(os.path.join(__file__ ,"../../dataset/COCO-2017-test-500/data"), img_name)
         result = eval(img_path, actor, 0, resnet, loss_fn_vgg)
         metrics.append(result)
     print(np.mean(metrics, axis=0))
+
+# if __name__ == '__main__':
+#     actor = Actor().cuda()
+#     actor.load_state_dict(torch.load("ckpt/999.pth"))
+#     img_names = os.listdir("data")
+#     img_names = [name for name in img_names if name.endswith(".jpg") or name.endswith(".png")]
+#     metrics = []
+#     random.shuffle(img_names)
+#     for img_name in img_names:
+#         img_path = os.path.join("data", img_name)
+#         result = eval(img_path, actor, 0)
+#         metrics.append(result)
+#     print(np.mean(metrics, axis=0))

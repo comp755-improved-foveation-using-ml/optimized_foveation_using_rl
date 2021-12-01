@@ -170,17 +170,15 @@ def eval(img_name, actor, epoch):
 
         return kl_div, num_full_res_pixels
 
-        
-
 if __name__ == '__main__':
     actor = Actor().cuda()
     optimizer = torch.optim.AdamW(actor.parameters(), lr=1e-3)
-    img_names = os.listdir("data")
+    img_names = os.listdir(os.path.abspath(os.path.join(__file__ ,"../../dataset/COCO-2017-train-500/data")))
     img_names = [name for name in img_names if name.endswith(".jpg") or name.endswith(".png")]
     for epoch in range(100):
         random.shuffle(img_names)
         for img_name in img_names:
-            img_path = os.path.join("data", img_name)
-            train(img_path, actor, optimizer, num_episodes=200, eval_freq=-1)
+            img_path = os.path.join(os.path.join(__file__ ,"../../dataset/COCO-2017-train-500/data"), img_name)
+            train(img_path, actor, optimizer, num_episodes=20, eval_freq=-1)
             # result = eval(img_path, actor, epoch)
         torch.save(actor.state_dict(), os.path.join("ckpt", "{}.pth".format(epoch)))
